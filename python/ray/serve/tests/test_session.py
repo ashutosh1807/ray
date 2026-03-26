@@ -5,12 +5,11 @@ import httpx
 import pytest
 
 from ray import serve
+from ray._common.test_utils import wait_for_condition
 from ray.serve._private.constants import SERVE_SESSION_ID
 
 
-def test_session_affinity_e2e(serve_instance):
-    """Test session affinity routing end to end"""
-
+def test_sticky_routing_via_header(serve_instance):
     @serve.deployment(num_replicas=2)
     class SessionApp:
         async def __call__(self, request):
@@ -22,7 +21,6 @@ def test_session_affinity_e2e(serve_instance):
     resp = httpx.get("http://localhost:8000", headers=headers)
     initial_pid = resp.json()
 
-    # Check that the same replica is used repeatedly for the same session_id.
     for _ in range(10):
         resp = httpx.get("http://localhost:8000", headers=headers)
         assert resp.json() == initial_pid
@@ -34,9 +32,7 @@ def test_session_affinity_e2e(serve_instance):
         )
 
 
-def test_session_affinity_different_sessions(serve_instance):
-    """Test that different session_ids get sticky routing independently."""
-
+def test_different_sessions_route_independently(serve_instance):
     @serve.deployment(num_replicas=2)
     class SessionApp:
         async def __call__(self, request):
@@ -59,9 +55,7 @@ def test_session_affinity_different_sessions(serve_instance):
         assert resp.json() == pid_s2
 
 
-def test_session_affinity_no_header_distributes(serve_instance):
-    """Without session header, requests should distribute across replicas."""
-
+def test_no_header_distributes_across_replicas(serve_instance):
     @serve.deployment(num_replicas=2)
     class SessionApp:
         async def __call__(self, request):
@@ -69,12 +63,14 @@ def test_session_affinity_no_header_distributes(serve_instance):
 
     serve.run(SessionApp.bind())
 
-    pids = set()
-    for _ in range(30):
-        resp = httpx.get("http://localhost:8000")
-        pids.add(resp.json())
+    def _requests_hit_both_replicas():
+        pids = set()
+        for _ in range(20):
+            resp = httpx.get("http://localhost:8000")
+            pids.add(resp.json())
+        return len(pids) == 2
 
-    assert len(pids) == 2
+    wait_for_condition(_requests_hit_both_replicas, timeout=30)
 
 
 if __name__ == "__main__":

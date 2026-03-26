@@ -2320,7 +2320,7 @@ class TestSessionAffinity:
             task = loop.create_task(s._choose_replica_for_request(request))
             assert (await task) == other_replica
 
-    async def test_session_no_session_id_routes_normally(self, pow_2_router):
+    async def test_no_session_id_routes_normally(self, pow_2_router):
         """Requests without session_id should route normally."""
         s = pow_2_router
         loop = get_or_create_event_loop()
@@ -2340,7 +2340,7 @@ class TestSessionAffinity:
         # Without session_id, both replicas should be eligible.
         assert replicas_chosen == {r1, r2}
 
-    async def test_session_mapping_cleaned_on_replica_death(self, pow_2_router):
+    async def test_mapping_cleaned_on_replica_death(self, pow_2_router):
         """on_replica_actor_died should clean up session mappings."""
         s = pow_2_router
         loop = get_or_create_event_loop()
@@ -2360,6 +2360,27 @@ class TestSessionAffinity:
 
         # Session mapping should be cleaned up.
         assert first_replica.replica_id not in set(s._session_id_to_replica_id.values())
+
+    async def test_mapping_cleaned_on_update_replicas(self, pow_2_router):
+        """update_replicas with a reduced set should clean up session mappings."""
+        s = pow_2_router
+        loop = get_or_create_event_loop()
+
+        r1 = FakeRunningReplica("r1")
+        r1.set_queue_len_response(0)
+        r2 = FakeRunningReplica("r2")
+        r2.set_queue_len_response(0)
+        s.update_replicas([r1, r2])
+
+        request = fake_pending_request(session_id="s1")
+        mapped_replica = await loop.create_task(s._choose_replica_for_request(request))
+        assert "s1" in s._session_id_to_replica_id
+
+        # Scale down: remove the mapped replica via update_replicas.
+        survivor = r2 if mapped_replica == r1 else r1
+        s.update_replicas([survivor])
+
+        assert "s1" not in s._session_id_to_replica_id
 
     async def test_different_sessions_different_replicas(self, pow_2_router):
         """Different session_ids can map to different replicas."""

@@ -12,7 +12,7 @@ from ray.actor import ActorHandle
 from ray.llm._internal.serve.routing_policies.prefix_aware.prefix_tree import (
     PrefixTreeActor,
 )
-from ray.serve._private.common import ReplicaID, RequestMetadata
+from ray.serve._private.common import ReplicaID
 from ray.serve._private.constants import (
     SERVE_CONTROLLER_NAME,
     SERVE_LOGGER_NAME,
@@ -39,7 +39,7 @@ logger = logging.getLogger(SERVE_LOGGER_NAME)
 
 
 class PrefixCacheAffinityRouter(
-    LocalityMixin, MultiplexMixin, SessionMixin, RequestRouter
+    LocalityMixin, SessionMixin, MultiplexMixin, RequestRouter
 ):
     """Extends the PowerOfTwoChoicesRequestRouter with prefix-matching capabilities.
 
@@ -398,17 +398,6 @@ class PrefixCacheAffinityRouter(
 
         return fallback_replicas
 
-    def _fulfill_next_pending_request(
-        self,
-        replica: RunningReplica,
-        request_metadata: Optional[RequestMetadata] = None,
-    ):
-        super()._fulfill_next_pending_request(replica, request_metadata)
-        if request_metadata and request_metadata.session_id:
-            self._record_session_assignment(
-                request_metadata.session_id, replica.replica_id
-            )
-
     # Start Sphinx tag: __begin_on_request_routed__
     def on_request_routed(
         self,
@@ -421,10 +410,6 @@ class PrefixCacheAffinityRouter(
         This is used as a callback to update the state of the request router
         after a response is generated.
         """
-        if pending_request is not None and pending_request.metadata.session_id:
-            self._record_session_assignment(
-                pending_request.metadata.session_id, replica_id
-            )
         # Right now this only inserts the prompt into the prefix tree, not the response (streaming response makes things complicated)
         if (
             pending_request is not None
